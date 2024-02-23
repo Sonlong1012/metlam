@@ -1,0 +1,296 @@
+#include <SoftwareSerial.h>
+
+#include <ESP8266WiFi.h>
+#include <WiFiClient.h>
+#include <ESP8266WebServer.h>
+#include <ESP8266mDNS.h>
+
+#include <PubSubClient.h> 
+#include <ArduinoJson.h>
+
+#ifndef APSSID
+
+#define APSSID "HSU_Students" // existing Wifi network
+#define APPSK  "dhhs12cnvch"
+// #define APSSID "SonLong" // existing Wifi network
+// #define APPSK  "long6485"
+#endif
+
+#define TX_PIN D7 //chân D7 arduino có chức năng của TX
+#define RX_PIN D6 // chân D6 arduino có chức năng của RX
+
+
+#define SOIL_MOIST_1_PIN A0 // Chân A1 nối với cảm biến độ ẩm
+
+#define mqtt_server "broker.emqx.io"
+const uint16_t mqtt_port = 1883; //Port của MQTT broker #define mqtt_topic_pub_led "thcntt3/ledstatus"
+
+#define mqtt_topic_sub_led "sonlong\\leadstatus"
+#define mqtt_topic_pub_led "sonlong\\leadstatus"
+#define mqtt_topic_pub_soilMoist "sonlong/Soil Moisture"
+#define mqtt_topic_sub_soilMoist "sonlong/Soil Moisture"
+#define mqtt_topic_pub_test "sonlong/test"
+#define mqtt_topic_sub_test "sonlong/test"
+
+WiFiClient espClient;
+PubSubClient client(espClient);
+StaticJsonDocument<256> doc; //PubSubClient limits the message size to 256 bytes (including header)
+
+const char *ssid = APSSID;
+const char *password = APPSK;
+
+ESP8266WebServer server(80);
+MDNSResponder mdns;
+
+bool status_relay = LOW;
+bool status_led = LOW;
+
+char ledstatus[32] = "on";  // Declare ledstatus in the global scope
+
+String data;
+
+int soilMoist; // độ ẩm đất 
+int relay = D5;
+int led = D0;
+
+int ledwifi = D2;
+
+int flag = 0;
+
+SoftwareSerial bluetooth(RX_PIN, TX_PIN); //RX_PIN Arduino nối vào chân TX của HC_06 vàTX_PIN Arduino nối với RX của HC_06
+
+
+void setup() {
+
+  Serial.begin(9600);
+  bluetooth.begin(9600);
+
+  // kết nối wifi
+  Serial.println();
+  Serial.print("Connect to existing Wifi network...");
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("");
+  Serial.println("WiFi connected");
+  Serial.println("IP address: ");
+  Serial.println(WiFi.localIP());
+
+  client.setServer(mqtt_server, mqtt_port);
+  client.setCallback(callback);
+  //Tạo trang web server đơn giản điều khiển đn LED
+  server.on("/", handleOnConnect);
+  server.on("/on", handleLedOn);
+  server.on("/off", handleLedOff);
+ 
+  server.onNotFound(handleNotFound);
+  
+  server.enableCORS(true);
+  
+  server.begin();
+  Serial.println("HTTP server started");
+
+  
+
+  pinMode(led, OUTPUT);
+  pinMode(ledwifi, OUTPUT);
+  pinMode(relay, OUTPUT);
+  
+  pinMode(RX_PIN, INPUT);
+  pinMode(TX_PIN, OUTPUT);
+
+  digitalWrite(led, HIGH);
+  Serial.println("Bluetooth On please press 1 or 0 blink LED");
+}
+void loop() {
+  if (status_led)
+  {
+    digitalWrite(ledwifi, HIGH);
+  }
+  else
+  {
+    digitalWrite(ledwifi, LOW);
+  }
+
+  server.handleClient();
+  if (!client.connected()) {
+    reconnect();
+  }
+  client.loop();
+
+
+  // đọc dữ liệu bluetooth
+  data="read";
+  if (bluetooth.available() > 0) 
+  {
+  char c = bluetooth.read();
+  switch (c)
+    {
+      case '1':
+        data = "on";
+        break;
+      case '0':
+        data = "off";
+        break;
+      case '2':
+        data = "read";
+        break;
+      default:
+        break;
+    }
+  }
+
+  if (data.length() > 0) 
+  {
+    if(data == "on" ||data == "1")
+    {
+      digitalWrite(led, HIGH);
+      Serial.println("LED On");
+      //led1=on
+      bluetooth.println("on");
+      data="";
+    }
+    else if(data == "off"||data == "0")
+    {
+      digitalWrite(led, LOW);
+      Serial.println("LED Off");
+      //led1=off
+      bluetooth.println("off");
+      data="";
+    }
+    else if(data == "read")
+    {
+      //  float h = dht.readHumidity();
+      // float h = 40;
+      // float t = 23.7;
+      // // Read temperature as Celsius (the default)
+      soilMoist = getSoilMoist(); 
+      // Serial.print("Humidity: ");
+      // Serial.print(h);
+      // Serial.println("%");
+      // Serial.print("Temperature: ");
+      // Serial.print(t);
+      // Serial.println("*C");
+      Serial.println("send data ...");
+      // bluetooth.print("Humidity=");
+      // bluetooth.print(h); //du lieu động
+      // bluetooth.print(";");
+      bluetooth.print("SoilMoist=");
+      bluetooth.print(soilMoist); //du lieu động
+      bluetooth.println(";#"); //# end message
+
+      // Serial.println("Nhiet do=");
+      // Serial.println (23.7);
+      Serial.println("Do am dat=");
+      Serial.println (soilMoist);
+      char buffer[256];
+
+      doc["name"] = "Relay";
+      doc["Do Am Dat"] = soilMoist;
+      // doc["Humidity"] = h;
+      // doc["Temperature"]=t;
+
+      size_t n = serializeJson(doc, buffer);
+      client.publish(mqtt_topic_pub_soilMoist, buffer, n);
+      delay(1000);
+    }
+  }
+}
+void handleOnConnect() {
+  status_relay = HIGH;
+  Serial.println("D6 Status: "+status_relay);
+  server.send(200, "text/html", "ok"); 
+}
+
+// hàm đọc độ ẩm đất 
+int getSoilMoist()
+{
+  int i = 0;
+  int anaValue = 0;
+  for (i = 0; i < 10; i++)  //
+  {
+    anaValue += analogRead(SOIL_MOIST_1_PIN); //Đọc giá trị cảm biến độ ẩm đất
+    delay(50);   // Đợi đọc giá trị ADC
+  }
+  anaValue = anaValue / (i);
+  anaValue = map(anaValue, 1023, 0, 0, 100); //Ít nước:0%  ==> Nhiều nước 100%
+  return anaValue;
+}
+
+void handleTemperature() {
+  // float h = dht.readHumidity();    
+  // float t = dht.readTemperature(); 
+  // float h =40;
+  // float t =23.7;
+  soilMoist = getSoilMoist(); 
+
+  // Serial.println("Do am: ");
+  // Serial.println(h);
+  // Serial.print("%, Nhiet do: ");
+  // Serial.print(t);
+  // Serial.println("°C");
+  Serial.print(", Do Am Dat: ");
+  Serial.print(soilMoist);
+  // server.send(200, "text/plain", "Do am: " + Do am:"+soilMoist);
+}
+
+void handleLedOn() {
+  status_led = HIGH;
+  Serial.println("D2 Status: ON");
+  server.send(200, "text/html", "on"); 
+}
+
+void handleLedOff() {
+  status_led = LOW;
+  Serial.println("D2 Status: OFF");
+  server.send(200, "text/html","off"); 
+}
+
+void handleNotFound(){
+  server.send(404, "text/plain", "Not found");
+}
+
+void callback(char* topic, byte* payload, unsigned int length) {
+  deserializeJson(doc, payload, length);
+  strlcpy(ledstatus, doc["status"] | "on", sizeof(ledstatus));
+  String mystring(ledstatus);
+  Serial.print("Message arrived [");
+  Serial.print(topic);
+  Serial.print("] ");
+  Serial.println(ledstatus);
+
+  if (mystring == "on") {
+    digitalWrite(relay, HIGH);
+    Serial.println("Relay turned ON");
+  } else {
+    digitalWrite(relay, LOW);
+    Serial.println("Relay turned OFF");
+  }
+  Serial.println();
+}
+
+void reconnect() {
+  while (!client.connected()) {
+    Serial.print("Attempting MQTT connection...");
+    if (client.connect("sonlong\\leadstatus")) {
+      Serial.println("connected");
+      char buffer[256];
+      doc["message"] = "Hello esp8266!";
+      size_t n = serializeJson(doc, buffer);
+      client.publish(mqtt_topic_pub_test, buffer, n);
+      doc["name"] = "led";
+      doc["status"] = "on";
+      doc["message"] = "turn on Relay";
+      n = serializeJson(doc, buffer);
+      client.publish(mqtt_topic_pub_led, buffer, n);
+      client.subscribe(mqtt_topic_sub_led);
+    } else {
+      Serial.print("failed, rc=");
+      Serial.print(client.state());
+      Serial.println(" try again in 5 seconds");
+      delay(5000);
+    }
+  }
+}
