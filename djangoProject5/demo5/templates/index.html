@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+    {% load static %}
+
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+</head>
+
+<body>
+<nav class="navbar navbar-inverse">
+    <div class="container-fluid">
+        <a class="navbar-brand">DJANGO FRAMEWORK</a>
+    </div>
+</nav>
+<style>
+    nav{
+
+    background-color: #2C3E50;
+    color: #f2f2f2;
+
+    }
+    .navbar-brand {
+        color: white; /* Màu chữ trắng */
+    }
+
+</style>
+
+  <div class="container mt-4">
+    <h1>Assets</h1>
+      <div class="mb-3">
+        <a href="{% url 'register' %}" class="btn btn-success">Add</a>
+    </div>
+
+    <!-- Search form -->
+   <form class="form-inline mb-3" method="get" action="{% url 'index' %}">
+        <input class="form-control mr-sm-2" type="text" name="q" placeholder="Search...">
+        <button class="btn btn-outline-success my-2 my-sm-0" type="submit">Search</button>
+    </form>
+
+   <table class="table table-bordered mt-4">
+    <thead class="thead-dark">
+        <th>Id</th>
+        <th>Name</th>
+        <th>Description</th>
+        <th>Type</th>
+        <th colspan="2" class="text-center">Action</th>
+    </thead>
+    {% for x in mem %}
+        <tr>
+            <td>{{ x.id }}</td>
+            <td>{{ x.name }}</td>  <!-- Corrected to x.name -->
+            <td>{{ x.description }}</td>  <!-- Corrected to x.type -->
+            <td>{{ x.type }}</td>  <!-- Corrected to x.description -->
+            <td class="text-center">
+                <a href="update/{{ x.id }}" class="btn btn-primary btn-sm">Update</a>
+            </td>
+            <td class="text-center">
+                <a href="delete/{{ x.id }}" class="btn btn-danger btn-sm">Delete</a>
+            </td>
+        </tr>
+    {% endfor %}
+</table>
+
+
+    <br><br>
+</div>
+
+    <!-- Bootstrap JS and Popper.js -->
+    <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.10.2/dist/umd/popper.min.js"></script>
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+</body>
+
+</html>
